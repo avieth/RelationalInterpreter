@@ -33,6 +33,7 @@ import GHC.TypeLits (Symbol)
 import Control.Applicative
 import Data.Proxy
 import Data.Relational
+import Data.Relational.Universe
 
 class RelationalInterpreter t where
   data Universe t :: * -> *
