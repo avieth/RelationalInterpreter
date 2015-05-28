@@ -18,13 +18,14 @@ Portability : non-portable (GHC only)
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Data.Relational.Interpreter (
 
     RelationalInterpreter(..)
-  , interpretSelect'
-  , ConvertToRow
-  , convertToRow
+
+  , Interpreter
+  , interpreter
 
   ) where
 
@@ -34,81 +35,91 @@ import Control.Applicative
 import Data.Proxy
 import Data.Relational
 import Data.Relational.Universe
+import Data.Relational.RelationalF
 
-class RelationalInterpreter t where
-  data Universe t :: * -> *
-  type InterpreterMonad t :: * -> *
-  type InterpreterSelectConstraint t (schema :: [(Symbol, *)]) (projected :: [(Symbol, *)]) (conditioned :: [[(Symbol, *)]]) :: Constraint
-  type InterpreterDeleteConstraint t (schema :: [(Symbol, *)]) (conditioned :: [[(Symbol, *)]]) :: Constraint
-  type InterpreterInsertConstraint t (schema :: [(Symbol, *)]) :: Constraint
-  type InterpreterUpdateConstraint t (schema :: [(Symbol, *)]) (projected :: [(Symbol, *)]) (conditioned :: [[(Symbol, *)]]) :: Constraint
-  interpretSelect
-    :: ( Every (InUniverse (Universe t)) (Snds projected)
-       , Every (InUniverse (Universe t)) (Snds (Concat conditioned))
-       , InterpreterSelectConstraint t schema projected conditioned
-       )
-    => Proxy t
-    -> Select '(tableName, schema) projected conditioned
-    -> (InterpreterMonad t) [HList (Fmap (Universe t) (Snds projected))]
-  interpretDelete
-    :: ( Every (InUniverse (Universe t)) (Snds (Concat conditioned))
-       , InterpreterDeleteConstraint t schema conditioned
-       )
-    => Proxy t
-    -> Delete '(tableName, schema) conditioned
-    -> (InterpreterMonad t) ()
-  interpretInsert
-    :: ( Every (InUniverse (Universe t)) (Snds schema)
-       , InterpreterInsertConstraint t schema
-       )
-    => Proxy t
-    -> Insert '(tableName, schema)
-    -> (InterpreterMonad t) ()
-  interpretUpdate
-    :: ( Every (InUniverse (Universe t)) (Snds projected)
-       , Every (InUniverse (Universe t)) (Snds (Concat conditioned))
-       , InterpreterUpdateConstraint t schema projected conditioned
-       )
-    => Proxy t
-    -> Update '(tableName, schema) projected conditioned
-    -> (InterpreterMonad t) ()
+type Interpreter f m = forall t . f (m t) -> m t
 
-class ConvertToRow universe (projected :: [(Symbol, *)]) where
-  convertToRow
-    :: (Every (InUniverse universe) (Snds projected))
-    => Proxy universe
-    -> Project projected
-    -> HList (Fmap universe (Snds projected))
-    -> Maybe (Row projected)
-
-instance ConvertToRow universe '[] where
-  convertToRow proxy EndProject HNil = Just EndRow
-
-instance ConvertToRow universe ts => ConvertToRow universe ( '(sym, t) ': ts) where
-  convertToRow proxy (x :+| prest) (v :> hrest) = case fromUniverse (Proxy :: Proxy t) v of
-      Nothing -> Nothing
-      Just v' -> (:&|) <$> (pure (fromColumnAndValue x v')) <*> (convertToRow proxy prest hrest)
-
--- | interpretSelect gives an HList of values, but loses their column names
---   and wraps them all in the Universe t datatype. This function tries to
---   return those HLists to Row datatypes, using the Project from the Select
---   clause to recover the Row's form and column names, and the universe of
---   the interpreter to convert the values.
-interpretSelect'
-  :: forall t tableName schema projected conditioned .
+interpreter
+  :: forall t (db :: [(Symbol, [(Symbol, *)])]) .
      ( RelationalInterpreter t
-     , Every (InUniverse (Universe t)) (Snds projected)
-     , Every (InUniverse (Universe t)) (Snds (Concat conditioned))
-     , InterpreterSelectConstraint t schema projected conditioned
-     , Functor (InterpreterMonad t)
-     , ConvertToRow (Universe t) projected
+     , Monad (InterpreterMonad t)
+     , Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
+     , InterpreterSelectConstraint t db
+     , InterpreterInsertConstraint t db
+     , InterpreterUpdateConstraint t db
+     , InterpreterDeleteConstraint t db
      )
   => Proxy t
-  -> Select '(tableName, schema) projected conditioned
-  -> (InterpreterMonad t) [Maybe (Row projected)]
-interpretSelect' proxyT select =
-    let interpretation = interpretSelect proxyT select
-    in  (fmap . fmap) (convertToRow proxyU (selectProjection select)) interpretation
+  -> Interpreter (RelationalF db) (InterpreterMonad t)
+interpreter proxyT term = case term of
+    RFSelect select next -> interpretSelect proxyT proxyDB select >>= next
+    RFInsert insert next -> interpretInsert proxyT proxyDB insert >>  next
+    RFUpdate update next -> interpretUpdate proxyT proxyDB update >>  next
+    RFDelete delete next -> interpretDelete proxyT proxyDB delete >>  next
   where
-    proxyU :: Proxy (Universe t)
-    proxyU = Proxy
+    proxyDB :: Proxy db
+    proxyDB = Proxy
+
+class RelationalInterpreter t where
+
+  data Universe t :: * -> *
+  type InterpreterMonad t :: * -> *
+  type InterpreterSelectConstraint t (db :: [(Symbol, [(Symbol, *)])]) :: Constraint
+  type InterpreterDeleteConstraint t (db :: [(Symbol, [(Symbol, *)])]) :: Constraint
+  type InterpreterInsertConstraint t (db :: [(Symbol, [(Symbol, *)])]) :: Constraint
+  type InterpreterUpdateConstraint t (db :: [(Symbol, [(Symbol, *)])]) :: Constraint
+
+  interpretSelect
+    :: forall tableName schema projected conditions (db :: [(Symbol, [(Symbol, *)])]) .
+       ( Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
+       , Contains (Snds (Concat (Snds db))) (Snds (Concat conditions))
+       , Contains (Snds (Concat (Snds db))) (Snds projected)
+       , AllFromUniverse db (Snds projected)
+       , AllToUniverse db (Snds (Concat conditions))
+       , ConvertToRow db projected
+       , InterpreterSelectConstraint t db
+       )
+    => Proxy t
+    -> Proxy db
+    -> Select '(tableName, schema) projected conditions
+    -> (InterpreterMonad t) [Row projected]
+
+  interpretDelete
+    :: forall tableName schema conditions (db :: [(Symbol, [(Symbol, *)])]) .
+       ( Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
+       , Contains (Snds (Concat (Snds db))) (Snds (Concat conditions))
+       , AllToUniverse db (Snds (Concat conditions))
+       , InterpreterDeleteConstraint t db
+       )
+    => Proxy t
+    -> Proxy db
+    -> Delete '(tableName, schema) conditions
+    -> (InterpreterMonad t) ()
+
+  interpretInsert
+    :: forall tableName schema (db :: [(Symbol, [(Symbol, *)])]) .
+       ( Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
+       , Contains (Snds (Concat (Snds db))) (Snds schema)
+       , RowToHList schema
+       , AllToUniverse db (Snds schema)
+       , InterpreterInsertConstraint t db
+       )
+    => Proxy t
+    -> Proxy db
+    -> Insert '(tableName, schema)
+    -> (InterpreterMonad t) ()
+
+  interpretUpdate
+    :: forall tableName schema projected conditions (db :: [(Symbol, [(Symbol, *)])]) .
+       ( Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
+       , Contains (Snds (Concat (Snds db))) (Snds (Concat conditions))
+       , Contains (Snds (Concat (Snds db))) (Snds projected)
+       , RowToHList projected
+       , AllToUniverse db (Snds projected)
+       , AllToUniverse db (Snds (Concat conditions))
+       , InterpreterUpdateConstraint t db
+       )
+    => Proxy t
+    -> Proxy db
+    -> Update '(tableName, schema) projected conditions
+    -> (InterpreterMonad t) ()
