@@ -21,6 +21,11 @@ module Data.Relational.RelationalF (
     RelationalF(..)
   , Relational
 
+  , rfselect
+  , rfinsert
+  , rfupdate
+  , rfdelete
+
   ) where
 
 import GHC.TypeLits
@@ -76,4 +81,19 @@ data RelationalF (db :: [(Symbol, [(Symbol, *)])]) a where
     -> a
     -> RelationalF db a
 
+instance Functor (RelationalF db) where
+  fmap f term = case term of
+      RFSelect select next -> RFSelect select (fmap f next)
+      RFInsert insert next -> RFInsert insert (f next)
+      RFUpdate update next -> RFUpdate update (f next)
+      RFDelete delete next -> RFDelete delete (f next)
+
 type Relational db = Free (RelationalF db)
+
+rfselect select = liftF (RFSelect select id)
+
+rfinsert insert = liftF (RFInsert insert ())
+
+rfupdate update = liftF (RFUpdate update ())
+
+rfdelete delete = liftF (RFDelete delete ())
