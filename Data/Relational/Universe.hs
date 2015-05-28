@@ -33,8 +33,6 @@ module Data.Relational.Universe (
   , ConvertToRow
   , convertToRow
 
-  , conditionToUniverse
-
   ) where
 
 import GHC.TypeLits (Symbol)
@@ -179,18 +177,3 @@ instance ConvertToRow db ts => ConvertToRow db ( '(sym, t) ': ts) where
         proxyContained = Proxy
         proxyContainer :: Proxy (Snds (Concat (Snds db)))
         proxyContainer = Proxy
-
-conditionToUniverse
-  :: forall (universe :: * -> *) (db :: [(Symbol, [(Symbol, *)])]) conditions .
-     ( Every (InUniverse universe) (Snds (Concat (Snds db)))
-     , Contains (Snds (Concat (Snds db))) (Snds (Concat conditions))
-     , AllToUniverse db (Snds (Concat conditions))
-     )
-  => Proxy universe
-  -> Proxy db
-  -> Condition conditions
-  -> HList (Fmap universe (Snds (Concat conditions)))
-conditionToUniverse proxyU proxyDB cs = allToUniverse proxyU proxyDB lst
-  where
-    lst :: HList (Snds (Concat conditions))
-    lst = conditionValues cs
