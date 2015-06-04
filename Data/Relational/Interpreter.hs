@@ -48,6 +48,7 @@ interpreter
      , InterpreterInsertConstraint t db
      , InterpreterUpdateConstraint t db
      , InterpreterDeleteConstraint t db
+     , Unique (TableNames db)
      )
   => Proxy t
   -> Interpreter (RelationalF db) (InterpreterMonad t)
