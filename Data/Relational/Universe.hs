@@ -24,20 +24,16 @@ module Data.Relational.Universe (
 
     InUniverse(..)
 
-  , AllToUniverse
   , allToUniverse
-
-  , AllFromUniverse
   , allFromUniverse
-
-  , ConvertToRow
+  , tagWithColumns
   , convertToRow
 
   ) where
 
-import GHC.TypeLits (Symbol)
 import Control.Applicative
 import Data.Proxy
+import Data.Functor.Identity
 import Data.Relational
 
 -- | Associate some type @s@ with a universe @u@ by providing an injection
@@ -70,110 +66,117 @@ class InUniverse (u :: * -> *) (s :: *) where
   toUniverseAssociated :: Proxy u -> UniverseType u s -> u s
   fromUniverseAssociated :: u s -> UniverseType u s
 
--- It's important that we do not mention a universe here in the class head.
--- That allows us to use this constraint on the GADT constructors of
--- RelationalF.
-class AllToUniverse (db :: [(Symbol, [(Symbol, *)])]) (types :: [*]) where
-    allToUniverse
-      :: forall universe .
-         ( Every (InUniverse universe) (Snds (Concat (Snds db)))
-         , Contains (Snds (Concat (Snds db))) types
-         )
-      => Proxy universe
-      -> Proxy db
-      -> HList types
-      -> HList (Fmap universe types)
+allToUniverse
+  :: forall universe db types .
+     ( TypeList types
+     , Every (InUniverse universe) (Snds (Concat (Snds db)))
+     , Contains (Snds (Concat (Snds db))) types
+     )
+  => Proxy universe
+  -> Proxy db
+  -> HList types
+  -> HList (Fmap universe types)
+allToUniverse proxyU _ hlist =
+    case containsConstraint proxyC proxyContainer proxyContained of
+        EveryConstraint ->
+            typeListMap
+              proxyU
+              proxyG
+              proxyC
+              mapper
+              constructor
+              destructor
+              hlist
+              HNil
+  where
+    proxyC :: Proxy (InUniverse universe)
+    proxyC = Proxy
+    proxyG :: Proxy Identity
+    proxyG = Proxy
+    proxyContainer :: Proxy (Snds (Concat (Snds db)))
+    proxyContainer = Proxy
+    proxyContained :: Proxy types
+    proxyContained = Proxy
+    mapper :: InUniverse universe t => Identity t -> Identity (universe t)
+    mapper = fmap (toUniverse proxyU)
+    constructor :: forall t ts . Identity (universe t) -> HList ts -> HList ((universe t) ': ts)
+    constructor x rest = (runIdentity x) :> rest
+    destructor :: forall t ts . HList (t ': ts) -> (Identity t, HList ts)
+    destructor hlst = case hlst of
+        x :> rest -> (Identity x, rest)
 
-instance AllToUniverse db '[] where
-    allToUniverse _ _ _ = HNil
+-- This type is here for the benefit of allFromUniverse, which requires it
+-- in order to use typeListUnmap.
+newtype FromUniverse (ts :: [*]) = FromUniverse (Maybe (HList ts))
 
-instance (AllToUniverse db ts) => AllToUniverse db (t ': ts) where
-    allToUniverse (proxyU :: Proxy universe) proxyDB lst = case lst of
-        -- In order to do this we must produce two proofs:
-        --   1. Every element of t ': ts is InUniverse, since everything in the
-        --      db is InUniverse and db contains t ': ts.
-        --   2. The tail of t ': ts is also contained by db, which allows us to
-        --      recurse.
-        x :> rest -> case containsConstraint proxyC proxyContainer proxyContained of
-            EveryConstraint -> case tailContainsProof proxyContainer proxyContained of
-                ContainsProof -> 
-                     (elemConstraint proxyC proxyT proxyContained (toUniverse proxyU x))
-                  :> (allToUniverse proxyU proxyDB rest)
-          where
-            proxyC :: Proxy (InUniverse universe)
-            proxyC = Proxy
-            proxyT :: Proxy t
-            proxyT = Proxy
-            proxyTS :: Proxy ts
-            proxyTS = Proxy
-            proxyContained :: Proxy (t ': ts)
-            proxyContained = Proxy
-            proxyContainer :: Proxy (Snds (Concat (Snds db)))
-            proxyContainer = Proxy
+outFromUniverse :: FromUniverse ts -> Maybe (HList ts)
+outFromUniverse (FromUniverse x) = x
 
-class AllFromUniverse (db :: [(Symbol, [(Symbol, *)])]) (types :: [*]) where
-    allFromUniverse
-      :: forall universe .
-         ( Every (InUniverse universe) (Snds (Concat (Snds db)))
-         , Contains (Snds (Concat (Snds db))) types
-         )
-      => Proxy universe
-      -> Proxy db
-      -> HList (Fmap universe types)
-      -> Maybe (HList types)
+allFromUniverse
+  :: forall universe db types .
+     ( TypeList types
+     , Every (InUniverse universe) (Snds (Concat (Snds db)))
+     , Contains (Snds (Concat (Snds db))) types
+     )
+  => Proxy universe
+  -> Proxy db
+  -> HList (Fmap universe types)
+  -> Maybe (HList types)
+allFromUniverse proxyU _ hlist =
+    case containsConstraint proxyC proxyContainer proxyContained of
+        EveryConstraint ->
+            outFromUniverse
+              ( typeListUnmap
+                  proxyU
+                  proxyMaybe
+                  proxyC
+                  unmapper
+                  constructor
+                  destructor
+                  hlist
+                  (FromUniverse (Just HNil))
+              )
+  where
+    proxyC :: Proxy (InUniverse universe)
+    proxyC = Proxy
+    proxyMaybe :: Proxy Maybe
+    proxyMaybe = Proxy
+    proxyContainer :: Proxy (Snds (Concat (Snds db)))
+    proxyContainer = Proxy
+    proxyContained :: Proxy types
+    proxyContained = Proxy
+    unmapper :: forall universe t . InUniverse universe t => Maybe (universe t) -> Maybe t
+    unmapper = (=<<) (fromUniverse (Proxy :: Proxy t))
+    constructor :: forall t ts . Maybe t -> FromUniverse ts -> FromUniverse (t ': ts)
+    constructor mx (FromUniverse mrest) = FromUniverse (ConsHList <$> mx <*> mrest)
+    destructor
+      :: forall t ts .
+         Proxy ts
+      -> HList ((universe t) ': (Fmap universe ts))
+      -> (Maybe (universe t), HList (Fmap universe ts))
+    destructor _ hlst = case hlst of
+        x :> rest -> (Just x, rest)
 
-instance AllFromUniverse db '[] where
-    allFromUniverse _ _ _ = pure HNil
+tagWithColumns
+  :: Project projected
+  -> HList (Snds projected)
+  -> Row projected
+tagWithColumns project hlist = case (project, hlist) of
+    -- This pattern match is exhaustive, because
+    --   length x = length (Snds x)
+    (EndProject, HNil) -> EndRow
+    (col :+| prest, h :> hrest) ->
+        (fromColumnAndValue col h) :&| (tagWithColumns prest hrest)
 
-instance (AllFromUniverse db ts) => AllFromUniverse db (t ': ts) where
-    allFromUniverse (proxyU :: Proxy universe) proxyDB lst = case lst of
-        x :> rest -> case containsConstraint proxyC proxyContainer proxyContained of
-            EveryConstraint -> case tailContainsProof proxyContainer proxyContained of
-                ContainsProof ->
-                        (:>)
-                    <$> (elemConstraint proxyC proxyT proxyContained (fromUniverse proxyT x))
-                    <*> (allFromUniverse proxyU proxyDB rest)
-          where
-            proxyC :: Proxy (InUniverse universe)
-            proxyC = Proxy
-            proxyT :: Proxy t
-            proxyT = Proxy
-            proxyContained :: Proxy (t ': ts)
-            proxyContained = Proxy
-            proxyContainer :: Proxy (Snds (Concat (Snds db)))
-            proxyContainer = Proxy
-
-class ConvertToRow (db :: [(Symbol, [(Symbol, *)])]) (projected :: [(Symbol, *)]) where
-    convertToRow
-      :: forall universe .
-         ( Every (InUniverse universe) (Snds (Concat (Snds db)))
-         , Contains (Snds (Concat (Snds db))) (Snds projected)
-         )
-      => Proxy universe
-      -> Proxy db
-      -> Project projected
-      -> HList (Fmap universe (Snds projected))
-      -> Maybe (Row projected)
-
-instance ConvertToRow db '[] where
-    convertToRow proxyU proxyDB EndProject HNil = Just EndRow
-
-instance ConvertToRow db ts => ConvertToRow db ( '(sym, t) ': ts) where
-    convertToRow (proxyU :: Proxy universe) proxyDB (x :+| prest) (v :> hrest) =
-        case containsConstraint proxyC proxyContainer proxyContained of
-            EveryConstraint -> case tailContainsProof proxyContainer proxyContained of
-                ContainsProof -> case elemConstraint proxyC proxyT proxyContained (fromUniverse (Proxy :: Proxy t) v) of
-                    Nothing -> Nothing
-                    Just v' ->
-                            (:&|)
-                        <$> (pure (fromColumnAndValue x v'))
-                        <*> (convertToRow proxyU proxyDB prest hrest)
-      where
-        proxyC :: Proxy (InUniverse universe)
-        proxyC = Proxy
-        proxyT :: Proxy t
-        proxyT = Proxy
-        proxyContained :: Proxy ( t ': (Snds ts) )
-        proxyContained = Proxy
-        proxyContainer :: Proxy (Snds (Concat (Snds db)))
-        proxyContainer = Proxy
+convertToRow
+  :: ( Every (InUniverse universe) (Snds (Concat (Snds db)))
+     , Contains (Snds (Concat (Snds db))) (Snds projected)
+     , TypeList (Snds projected)
+     )
+  => Proxy universe
+  -> Proxy db
+  -> Project projected
+  -> HList (Fmap universe (Snds projected))
+  -> Maybe (Row projected)
+convertToRow proxyU proxyDB proj =
+    fmap (tagWithColumns proj) . allFromUniverse proxyU proxyDB
