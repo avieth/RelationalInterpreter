@@ -21,7 +21,7 @@ module Data.Relational.RelationalF (
     RelationalF(..)
   , Relational
 
-  , rfselect
+  , rfrelation
   , rfinsert
   , rfupdate
   , rfdelete
@@ -37,24 +37,17 @@ import Data.Relational.Universe
 -- List of table names, and their associated schemas.
 data RelationalF (db :: [(Symbol, [(Symbol, *)])]) a where
 
-  RFSelect
-    :: ( Elem '(tableName, schema) db
-       , Contains (Snds (Concat (Snds db))) (Snds schema)
-       , Contains (Snds (Concat (Snds db))) (Snds projection)
-       , Contains (Snds (Concat (Snds db))) (Snds (Concat condition))
-       , AllToUniverse db (Snds (Concat condition))
-       , AllFromUniverse db (Snds projection)
-       , ConvertToRow db projection
+  RFRelation
+    :: ( Contains (Snds (Concat (Snds db))) (Snds schema)
        )
-    => Select '(tableName, schema) projection condition
-    -> ([Row projection] -> a)
+    => Relation db schema
+    -> ([Row schema] -> a)
     -> RelationalF db a
 
   RFInsert
     :: ( Elem '(tableName, schema) db
        , Contains (Snds (Concat (Snds db))) (Snds schema)
        , RowToHList schema
-       , AllToUniverse db (Snds schema)
        )
     => Insert '(tableName, schema)
     -> a
@@ -65,8 +58,6 @@ data RelationalF (db :: [(Symbol, [(Symbol, *)])]) a where
        , Contains (Snds (Concat (Snds db))) (Snds row)
        , Contains (Snds (Concat (Snds db))) (Snds (Concat condition))
        , RowToHList row
-       , AllToUniverse db (Snds row)
-       , AllToUniverse db (Snds (Concat condition))
        )
     => Update '(tableName, schema) row condition
     -> a
@@ -75,7 +66,6 @@ data RelationalF (db :: [(Symbol, [(Symbol, *)])]) a where
   RFDelete
     :: ( Elem '(tableName, schema) db
        , Contains (Snds (Concat (Snds db))) (Snds (Concat condition))
-       , AllToUniverse db (Snds (Concat condition))
        )
     => Delete '(tableName, schema) condition
     -> a
@@ -83,14 +73,14 @@ data RelationalF (db :: [(Symbol, [(Symbol, *)])]) a where
 
 instance Functor (RelationalF db) where
   fmap f term = case term of
-      RFSelect select next -> RFSelect select (fmap f next)
+      RFRelation relation next -> RFRelation relation (fmap f next)
       RFInsert insert next -> RFInsert insert (f next)
       RFUpdate update next -> RFUpdate update (f next)
       RFDelete delete next -> RFDelete delete (f next)
 
 type Relational db = Free (RelationalF db)
 
-rfselect select = liftF (RFSelect select id)
+rfrelation relation = liftF (RFRelation relation id)
 
 rfinsert insert = liftF (RFInsert insert ())
 
