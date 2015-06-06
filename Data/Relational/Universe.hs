@@ -77,7 +77,7 @@ allToUniverse
   -> HList types
   -> HList (Fmap universe types)
 allToUniverse proxyU _ hlist =
-    case containsConstraint proxyC proxyContainer proxyContained of
+    case (containsConstraint proxyC proxyContainer proxyContained) of
         EveryConstraint ->
             typeListMap
               proxyU

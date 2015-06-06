@@ -47,7 +47,6 @@ data RelationalF (db :: [(Symbol, [(Symbol, *)])]) a where
   RFInsert
     :: ( Elem '(tableName, schema) db
        , Contains (Snds (Concat (Snds db))) (Snds schema)
-       , RowToHList schema
        )
     => Insert '(tableName, schema)
     -> a
@@ -57,7 +56,6 @@ data RelationalF (db :: [(Symbol, [(Symbol, *)])]) a where
     :: ( Elem '(tableName, schema) db
        , Contains (Snds (Concat (Snds db))) (Snds row)
        , Contains (Snds (Concat (Snds db))) (Snds (Concat condition))
-       , RowToHList row
        )
     => Update '(tableName, schema) row condition
     -> a

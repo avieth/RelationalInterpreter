@@ -96,7 +96,6 @@ class RelationalInterpreter t where
     :: forall tableName schema (db :: [(Symbol, [(Symbol, *)])]) .
        ( Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
        , Contains (Snds (Concat (Snds db))) (Snds schema)
-       , RowToHList schema
        , InterpreterInsertConstraint t db
        )
     => Proxy t
@@ -109,7 +108,6 @@ class RelationalInterpreter t where
        ( Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
        , Contains (Snds (Concat (Snds db))) (Snds (Concat conditions))
        , Contains (Snds (Concat (Snds db))) (Snds projected)
-       , RowToHList projected
        , InterpreterUpdateConstraint t db
        )
     => Proxy t
