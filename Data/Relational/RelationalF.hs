@@ -15,11 +15,11 @@ Portability : non-portable (GHC only)
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Relational.RelationalF (
 
     RelationalF(..)
-  , Relational
 
   , rfrelation
   , rfinsert
@@ -35,53 +35,72 @@ import Data.Relational.Universe
 
 -- First parameter describes the database on which we act.
 -- List of table names, and their associated schemas.
-data RelationalF (db :: [(Symbol, [(Symbol, *)])]) a where
+data RelationalF (universe :: *) (db :: [(Symbol, [(Symbol, *)])]) a where
 
   RFRelation
-    :: ( Contains (Snds (Concat (Snds db))) (Snds schema)
+    :: ( -- Contains (Snds (Concat (Snds db))) (Snds schema)
+       -- TODO might be nice to take a smaller db in the Relation type and
+       -- assert that it's contained in the RelationalF's db type.
        )
-    => Relation db schema
+    => Relation universe db tableName schema
     -> ([Row schema] -> a)
-    -> RelationalF db a
+    -> RelationalF universe db a
 
   RFInsert
     :: ( Elem '(tableName, schema) db
-       , Contains (Snds (Concat (Snds db))) (Snds schema)
+         -- , Contains (Snds (Concat (Snds db))) (Snds schema)
        )
-    => Insert '(tableName, schema)
+    => Insert universe db '(tableName, schema)
     -> a
-    -> RelationalF db a
+    -> RelationalF universe db a
 
   RFUpdate
     :: ( Elem '(tableName, schema) db
-       , Contains (Snds (Concat (Snds db))) (Snds row)
-       , Contains (Snds (Concat (Snds db))) (Snds (Concat condition))
+         -- , Contains (Snds (Concat (Snds db))) (ConditionTypeList condition)
+         -- , Contains (Snds (Concat (Snds db))) (Snds row)
        )
-    => Update '(tableName, schema) row condition
+    => Update universe db '(tableName, schema) row condition
     -> a
-    -> RelationalF db a
+    -> RelationalF universe db a
 
   RFDelete
     :: ( Elem '(tableName, schema) db
-       , Contains (Snds (Concat (Snds db))) (Snds (Concat condition))
+         -- , Contains (Snds (Concat (Snds db))) (ConditionTypeList condition)
        )
-    => Delete '(tableName, schema) condition
+    => Delete universe db '(tableName, schema) condition
     -> a
-    -> RelationalF db a
+    -> RelationalF universe db a
 
-instance Functor (RelationalF db) where
+instance Functor (RelationalF universe db) where
   fmap f term = case term of
       RFRelation relation next -> RFRelation relation (fmap f next)
       RFInsert insert next -> RFInsert insert (f next)
       RFUpdate update next -> RFUpdate update (f next)
       RFDelete delete next -> RFDelete delete (f next)
 
-type Relational db = Free (RelationalF db)
+rfrelation
+    :: forall universe db name schema .
+       Relation universe db name schema
+    -> RelationalF universe db [Row schema]
+rfrelation relation = RFRelation relation id
 
-rfrelation relation = liftF (RFRelation relation id)
+rfinsert
+    :: forall universe db name schema .
+       ( Elem '(name, schema) db )
+    => Insert universe db '(name, schema)
+    -> RelationalF universe db ()
+rfinsert insert = RFInsert insert ()
 
-rfinsert insert = liftF (RFInsert insert ())
+rfupdate
+    :: forall universe db name schema row condition .
+       ( Elem '(name, schema) db )
+    => Update universe db '(name, schema) row condition
+    -> RelationalF universe db ()
+rfupdate update = RFUpdate update ()
 
-rfupdate update = liftF (RFUpdate update ())
-
-rfdelete delete = liftF (RFDelete delete ())
+rfdelete
+    :: forall universe db name schema condition .
+       ( Elem '(name, schema) db )
+    => Delete universe db '(name, schema) condition
+    -> RelationalF universe db ()
+rfdelete delete = RFDelete delete ()

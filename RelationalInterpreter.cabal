@@ -17,8 +17,7 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 library
-  exposed-modules:     Data.Relational.Universe
-                     , Data.Relational.Interpreter
+  exposed-modules:     Data.Relational.Interpreter
                      , Data.Relational.RelationalF
   -- other-modules:       
   other-extensions:    AutoDeriveTypeable

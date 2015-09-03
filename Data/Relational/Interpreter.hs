@@ -40,30 +40,29 @@ import Data.Relational.RelationalF
 type Interpreter f m = forall t . f (m t) -> m t
 
 interpreter
-  :: forall t (db :: [(Symbol, [(Symbol, *)])]) .
+  :: forall (db :: [(Symbol, [(Symbol, *)])]) t .
      ( RelationalInterpreter t
      , Monad (InterpreterMonad t)
-     , Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
+     --, Every (InRelationalUniverse (Universe t)) (Snds (Concat (Snds db)))
      , InterpreterRelationConstraint t db
      , InterpreterInsertConstraint t db
      , InterpreterUpdateConstraint t db
      , InterpreterDeleteConstraint t db
-     , Unique (TableNames db)
      )
   => Proxy t
-  -> Interpreter (RelationalF db) (InterpreterMonad t)
+  -> Interpreter (RelationalF (Universe t) db) (InterpreterMonad t)
 interpreter proxyT term = case term of
     RFRelation relation next -> interpretRelation proxyT proxyDB relation >>= next
-    RFInsert insert next -> interpretInsert proxyT proxyDB insert >> next
-    RFUpdate update next -> interpretUpdate proxyT proxyDB update >> next
-    RFDelete delete next -> interpretDelete proxyT proxyDB delete >> next
+    RFInsert insert next     -> interpretInsert proxyT proxyDB insert     >>  next
+    RFUpdate update next     -> interpretUpdate proxyT proxyDB update     >>  next
+    RFDelete delete next     -> interpretDelete proxyT proxyDB delete     >>  next
   where
     proxyDB :: Proxy db
     proxyDB = Proxy
 
-class RelationalInterpreter t where
+class (RelationalUniverse (Universe t)) => RelationalInterpreter t where
 
-  data Universe t :: * -> *
+  type Universe t :: *
   type InterpreterMonad t :: * -> *
   type InterpreterRelationConstraint t (db :: [(Symbol, [(Symbol, *)])]) :: Constraint
   type InterpreterDeleteConstraint t (db :: [(Symbol, [(Symbol, *)])]) :: Constraint
@@ -72,45 +71,45 @@ class RelationalInterpreter t where
 
   interpretRelation
     :: forall tableName schema projected conditions (db :: [(Symbol, [(Symbol, *)])]) .
-       ( Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
-       , Contains (Snds (Concat (Snds db))) (Snds projected)
-       , InterpreterRelationConstraint t db
+       ( --Every (InRelationalUniverse (Universe t)) (Snds (Concat (Snds db)))
+       --, Contains (Snds (Concat (Snds db))) (Snds projected)
+         InterpreterRelationConstraint t db
        )
     => Proxy t
     -> Proxy db
-    -> Relation db projected
+    -> Relation (Universe t) db tableName projected
     -> (InterpreterMonad t) [Row projected]
 
   interpretDelete
     :: forall tableName schema conditions (db :: [(Symbol, [(Symbol, *)])]) .
-       ( Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
-       , Contains (Snds (Concat (Snds db))) (Snds (Concat conditions))
-       , InterpreterDeleteConstraint t db
+       ( --Every (InRelationalUniverse (Universe t)) (Snds (Concat (Snds db)))
+       --, Contains (Snds (Concat (Snds db))) (ConditionTypeList conditions)
+         InterpreterDeleteConstraint t db
        )
     => Proxy t
     -> Proxy db
-    -> Delete '(tableName, schema) conditions
+    -> Delete (Universe t) db '(tableName, schema) conditions
     -> (InterpreterMonad t) ()
 
   interpretInsert
     :: forall tableName schema (db :: [(Symbol, [(Symbol, *)])]) .
-       ( Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
-       , Contains (Snds (Concat (Snds db))) (Snds schema)
-       , InterpreterInsertConstraint t db
+       ( --Every (InRelationalUniverse (Universe t)) (Snds (Concat (Snds db)))
+       --, Contains (Snds (Concat (Snds db))) (Snds schema)
+         InterpreterInsertConstraint t db
        )
     => Proxy t
     -> Proxy db
-    -> Insert '(tableName, schema)
+    -> Insert (Universe t) db '(tableName, schema)
     -> (InterpreterMonad t) ()
 
   interpretUpdate
     :: forall tableName schema projected conditions (db :: [(Symbol, [(Symbol, *)])]) .
-       ( Every (InUniverse (Universe t)) (Snds (Concat (Snds db)))
-       , Contains (Snds (Concat (Snds db))) (Snds (Concat conditions))
-       , Contains (Snds (Concat (Snds db))) (Snds projected)
-       , InterpreterUpdateConstraint t db
+       ( --Every (InRelationalUniverse (Universe t)) (Snds (Concat (Snds db)))
+       --, Contains (Snds (Concat (Snds db))) (ConditionTypeList conditions)
+       --, Contains (Snds (Concat (Snds db))) (Snds projected)
+         InterpreterUpdateConstraint t db
        )
     => Proxy t
     -> Proxy db
-    -> Update '(tableName, schema) projected conditions
+    -> Update (Universe t) db '(tableName, schema) projected conditions
     -> (InterpreterMonad t) ()
